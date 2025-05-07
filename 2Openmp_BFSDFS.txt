@@ -1,0 +1,132 @@
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <omp.h>
+
+#define MAX_NODES 100
+
+std::vector<std::vector<int>> graph(MAX_NODES, std::vector<int>(MAX_NODES));
+std::vector<int> visited(MAX_NODES);
+std::queue<int> q;
+
+void parallelBFS(int start, int n) {
+    q.push(start);
+    visited[start] = 1;
+
+    while (!q.empty()) {
+        int currentSize = q.size();
+
+        #pragma omp parallel for shared(q, graph, visited, currentSize)
+        for (int i = 0; i < currentSize; i++) {
+            int node;
+
+            #pragma omp critical
+            {
+                node = q.front();
+                q.pop();
+                std::cout << "Visited " << node << " by thread " << omp_get_thread_num() << std::endl;
+            }
+
+            for (int j = 0; j < n; j++) {
+                if (graph[node][j] && !visited[j]) {
+                    #pragma omp critical
+                    {
+                        if (!visited[j]) {
+                            visited[j] = 1;
+                            q.push(j);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void dfsTask(int node, int n) {
+    bool shouldProceed = false;
+
+    #pragma omp critical
+    {
+        if (!visited[node]) {
+            visited[node] = 1;
+            std::cout << "Visited " << node << " by thread " << omp_get_thread_num() << std::endl;
+            shouldProceed = true;
+        }
+    }
+
+    if (!shouldProceed) return;
+
+    for (int i = 0; i < n; i++) {
+        if (graph[node][i]) {
+            #pragma omp task
+            dfsTask(i, n);
+        }
+    }
+
+    #pragma omp taskwait
+}
+
+void parallelDFS(int start, int n) {
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            dfsTask(start, n);
+        }
+    }
+}
+
+int main() {
+    int n = 6;
+
+    int adjacencyMatrix[6][6] = {
+        {0, 1, 1, 0, 0, 0},
+        {1, 0, 0, 1, 1, 0},
+        {1, 0, 0, 0, 1, 0},
+        {0, 1, 0, 0, 0, 1},
+        {0, 1, 1, 0, 0, 1},
+        {0, 0, 0, 1, 1, 0}
+    };
+
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+            graph[i][j] = adjacencyMatrix[i][j];
+
+    std::cout << "Parallel BFS:" << std::endl;
+    for (int i = 0; i < n; i++) visited[i] = 0;
+    parallelBFS(0, n);
+
+    std::cout << "\nParallel DFS:" << std::endl;
+    for (int i = 0; i < n; i++) visited[i] = 0;
+    parallelDFS(0, n);
+
+    return 0;
+}
+
+/*
+
+sudo apt update
+sudo apt install build-essential
+gedit bfsdfs.cpp
+
+g++ -fopenmp -o parallel_graph_traversal parallel_graph_traversal.cpp
+./parallel_graph_traversal
+
+OUTPUT:-
+Parallel BFS:
+Visited 0 by thread 0
+Visited 1 by thread 1
+Visited 2 by thread 2
+Visited 3 by thread 3
+Visited 4 by thread 4
+Visited 5 by thread 5
+
+Parallel DFS:
+Visited 0 by thread 0
+Visited 1 by thread 1
+Visited 2 by thread 2
+Visited 3 by thread 3
+Visited 4 by thread 4
+Visited 5 by thread 5
+
+*/
